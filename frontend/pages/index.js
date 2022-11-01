@@ -9,18 +9,20 @@ const bytesWithoutConstructor =
 
 const disassembly = disasembler.disassemble(bytesWithoutConstructor);
 
+// Theme
+// TODO: handle multiple themes
 let cTheme = {};
 for (const e of monokai.tokenColors) {
     cTheme[e.name] = e?.settings?.foreground;
 }
 
+// Dissassembly view components
 function DisassemblyEmptyLine() {
     return <div className="mb-3"></div>;
 }
 
 function DisassemblyLineLabel(props) {
     const { name } = props;
-
     return <div style={{ color: cTheme["Function name"] }}>{name}:</div>;
 }
 
@@ -40,12 +42,8 @@ function getOpcodeColor(bytecode) {
     return "#FFFFFF";
 }
 
-const renderedLinesCache = {
-    positions: {},
-};
-
 function DisassemblyLineOpcode(props) {
-    const { opcode } = props;
+    const { opcode, viewStorage } = props;
     const ref = useRef();
 
     const addrDisplay = `0x${opcode.addr.toString(16)}`;
@@ -57,7 +55,7 @@ function DisassemblyLineOpcode(props) {
     useLayoutEffect(() => {
         if (ref.current) {
             const rect = ref.current.getBoundingClientRect();
-            renderedLinesCache.positions[opcode.addr] = {
+            viewStorage.positions[opcode.addr] = {
                 top: rect.top + window.scrollY + rect.height / 2,
                 height: rect.height,
             };
@@ -90,8 +88,10 @@ function DisassemblyEnd(props) {
 }
 
 function DisassemblyJumps(props) {
+    const { disassembly, viewStorage } = props;
     const [jumps, setJumps] = useState({});
-    renderedLinesCache.setJumps = setJumps;
+
+    viewStorage.setJumps = setJumps;
 
     function getOpcodeByAddr(addr) {
         const idx = disassembly.opcodes.findIndex((e) => e.addr == addr);
@@ -165,12 +165,6 @@ function DisassemblyJumps(props) {
             }
         }
 
-        ///
-        ////
-        ////
-        ///
-
-        // TODO: jump should be rerendered only when all opcodes have been rendered
         let currentX = 0;
         let COLUMN_SIZE = 16;
         let maxSize = columns.length * COLUMN_SIZE;
@@ -254,17 +248,14 @@ function DisassemblyJumps(props) {
 
 function DisassemblyView(props) {
     const { disassembly } = props;
-    const [index, setIndex] = useState(0);
+
+    const viewStorage = useRef({ positions: {} });
 
     function handleDisassemblyEnd() {
-        console.log("Disasm end");
-
-        /*for (const addr of Object.keys(renderedLinesCache.positions)) {
-            const e = renderedLinesCache.positions[addr];
-        }*/
-
-        renderedLinesCache.setJumps(renderedLinesCache.positions);
-        //setIndex((prev) => prev + 1);
+        // When the last element in the disassembly view is rendered
+        // We trigger a re-render of the jump view
+        viewStorage.current.setJumps &&
+            viewStorage.current.setJumps(viewStorage.current.positions);
     }
 
     function renderDisassembly() {
@@ -287,7 +278,12 @@ function DisassemblyView(props) {
                 elements.push(<DisassemblyLineLabel name={label.name} />);
             }
 
-            elements.push(<DisassemblyLineOpcode opcode={e} />);
+            elements.push(
+                <DisassemblyLineOpcode
+                    opcode={e}
+                    viewStorage={viewStorage.current}
+                />
+            );
         }
 
         elements.push(
@@ -300,7 +296,10 @@ function DisassemblyView(props) {
     return (
         <div className="flex">
             <div>
-                <DisassemblyJumps disassembly={disassembly} />
+                <DisassemblyJumps
+                    disassembly={disassembly}
+                    viewStorage={viewStorage.current}
+                />
             </div>
             <div className="font-mono text-sm text-white overflow-y-auto h-full">
                 {renderDisassembly()}
