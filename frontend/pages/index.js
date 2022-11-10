@@ -10,7 +10,10 @@ const bytesWithoutConstructor =
 const bytes =
     "0x60806040526000805534801561001457600080fd5b50610150806100246000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c806357de26a41461003b578063d09de08a14610059575b600080fd5b610043610063565b604051610050919061009c565b60405180910390f35b61006161006c565b005b60008054905090565b600160005461007b91906100e6565b600081905550565b6000819050919050565b61009681610083565b82525050565b60006020820190506100b1600083018461008d565b92915050565b7f4e487b7100000000000000000000000000000000000000000000000000000000600052601160045260246000fd5b60006100f182610083565b91506100fc83610083565b9250828201905080821115610114576101136100b7565b5b9291505056fea2646970667358221220b6ab24c13c6cda0b644dfc989c0d2a21c12611547602bde8a254f33c3598539b64736f6c63430008110033";
 
-const disassembly = disasembler.disassemble(bytesWithoutConstructor);
+import program1 from "../data/test/program1.json";
+
+//const disassembly = disasembler.disassemble(program1.program1);
+const disassembly = disasembler.disassemble(bytes);
 
 // Theme
 // TODO: handle multiple themes
@@ -46,7 +49,7 @@ function getOpcodeColor(bytecode) {
 }
 
 function DisassemblyLineOpcode(props) {
-    const { opcode, viewStorage } = props;
+    const { pc, opcode, viewStorage } = props;
     const ref = useRef();
 
     const addrDisplay = `0x${opcode.addr.toString(16)}`;
@@ -67,8 +70,10 @@ function DisassemblyLineOpcode(props) {
         }
     });
 
+    const activeClass = pc === opcode.addr ? "bg-slate-600" : "";
+
     return (
-        <div ref={ref} className="hover:bg-slate-400">
+        <div ref={ref} className={`hover:bg-slate-400 ${activeClass}`}>
             <span className="mr-4" style={{ color: cTheme["Comment"] }}>
                 {addrDisplay}
             </span>
@@ -248,11 +253,16 @@ function DisassemblyJumps(props) {
         return <div style={{ width: maxSize }}>{elements}</div>;
     }
 
-    return <div>{renderJumps()}</div>;
+    // TODO: why offset -22 when position is relative?
+    return (
+        <div className="relative" style={{ top: -22 }}>
+            {renderJumps()}
+        </div>
+    );
 }
 
 function DisassemblyView(props) {
-    const { disassembly } = props;
+    const { disassembly, vmRegisters } = props;
 
     const viewStorage = useRef({ positions: {} });
 
@@ -285,6 +295,7 @@ function DisassemblyView(props) {
 
             elements.push(
                 <DisassemblyLineOpcode
+                    pc={vmRegisters.pc}
                     opcode={e}
                     viewStorage={viewStorage.current}
                 />
@@ -299,14 +310,15 @@ function DisassemblyView(props) {
     }
 
     return (
-        <div className="flex">
-            <div>
-                <DisassemblyJumps
-                    disassembly={disassembly}
-                    viewStorage={viewStorage.current}
-                />
-            </div>
-            <div className="font-mono text-sm text-white overflow-y-auto h-full">
+        <div
+            className="flex overflow-y-auto overflow-hidden border"
+            style={{ width: 600, height: 800 }}
+        >
+            <DisassemblyJumps
+                disassembly={disassembly}
+                viewStorage={viewStorage.current}
+            />
+            <div className="font-mono text-sm text-white ">
                 {renderDisassembly()}
             </div>
         </div>
@@ -314,6 +326,29 @@ function DisassemblyView(props) {
 }
 
 export default function Home() {
+    const [vmRegisters, setVmRegisters] = useState({
+        pc: 0,
+    });
+
+    async function handleDebuggerStep() {
+        const res1 = await fetch("/api/debugger/step");
+        const res2 = await fetch("/api/debugger/state");
+        const state = await res2.json();
+        setVmRegisters((prev) => ({
+            ...prev,
+            pc: state.pc,
+        }));
+
+        console.log(state);
+    }
+
+    async function handleDebuggerReset() {
+        const res1 = await fetch("/api/debugger/start");
+        setVmRegisters((prev) => ({
+            pc: 0,
+        }));
+    }
+
     return (
         <div className={styles.container}>
             <Head>
@@ -325,8 +360,29 @@ export default function Home() {
                 <link rel="icon" href="/favicon.ico" />
             </Head>
 
-            <div className="bg-black w-screen h-screen">
-                <DisassemblyView disassembly={disassembly}></DisassemblyView>
+            <div className="flex bg-black w-screen h-screen">
+                <div>
+                    <div className="font-mono text-sm italic">ethersight</div>
+                    <DisassemblyView
+                        disassembly={disassembly}
+                        vmRegisters={vmRegisters}
+                    ></DisassemblyView>
+                </div>
+
+                <div className="p-2">
+                    <div
+                        className="cursor-pointer bg-white text-black font-mono p-2 m-2"
+                        onClick={handleDebuggerStep}
+                    >
+                        Step
+                    </div>
+                    <div
+                        className="cursor-pointer bg-white text-black font-mono p-2 m-2"
+                        onClick={handleDebuggerReset}
+                    >
+                        Reset
+                    </div>
+                </div>
             </div>
         </div>
     );

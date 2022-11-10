@@ -1,0 +1,19 @@
+{
+  "name": "backend",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@ethereumjs/blockchain": "^6.0.2",
+    "@ethereumjs/common": "^3.0.1",
+    "@ethereumjs/evm": "^1.2.2",
+    "@ethereumjs/statemanager": "^1.0.1",
+    "@ethereumjs/vm": "^6.2.0",
+    "express": "^4.18.2"
+  }
+}
