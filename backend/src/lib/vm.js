@@ -70,6 +70,9 @@ class VM {
             //code: Buffer.from(code.join(""), "hex"),
             code: Buffer.from(this.code, "hex"),
             gasLimit: BigInt(0xffff),
+            //data: "0x57de26a4000000000000000000000000",
+            //data: "0x23b872dd000000000000000000000000",
+            data: Buffer.from("57de26a4000000000000000000000000", "hex"),
         })
             .then((results) => {
                 console.log(`Returned: ${results.returnValue.toString("hex")}`);

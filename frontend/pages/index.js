@@ -44,9 +44,11 @@ function DisassemblyLineOpcode(props) {
     const addrDisplay = `0x${opcode.addr.toString(16)}`;
     const opcodeDisplay = opcode.opcode || byteToHex(opcode.bytecode);
     const operandDisplay =
-        opcode.operandValue !== undefined &&
-        opcode.operandValue !== null &&
-        `0x${opcode.operandValue.toString(16)}`;
+        opcode.operandValue !== undefined && opcode.operandValue !== null
+            ? `0x${opcode.operandValue.toString(16)}`
+            : opcode.operandValue;
+
+    console.log(operandDisplay);
     const opcodeColor = getOpcodeColor(opcode.bytecode);
 
     useLayoutEffect(() => {
@@ -67,7 +69,7 @@ function DisassemblyLineOpcode(props) {
                 {addrDisplay}
             </span>
             <span style={{ color: opcodeColor }}>{opcodeDisplay}</span>
-            {operandDisplay && (
+            {operandDisplay !== undefined && operandDisplay !== null && (
                 <span className="ml-2" style={{ color: cTheme["Number"] }}>
                     {operandDisplay}
                 </span>

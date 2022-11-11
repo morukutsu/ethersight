@@ -37,7 +37,7 @@ app.get("/code/load", (req, res) => {
 });
 
 app.get("/debugger/start", async (req, res) => {
-    vm = new VM(bytes);
+    vm = new VM(byteCode);
     await vm.start();
     res.send({});
 });
