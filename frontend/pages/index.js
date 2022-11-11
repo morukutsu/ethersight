@@ -13,7 +13,7 @@ const bytes =
 import program1 from "../data/test/program1.json";
 
 //const disassembly = disasembler.disassemble(program1.program1);
-const disassembly = disasembler.disassemble(bytes);
+//const disassembly = disasembler.disassemble(bytes);
 
 // Theme
 // TODO: handle multiple themes
@@ -201,8 +201,13 @@ function DisassemblyJumps(props) {
                 }
 
                 // Vertical lines
+                const baseKey = `${jump.jump.addr.toString(
+                    16
+                )}_${jump.jump.from.toString(16)}`;
+
                 elements.push(
                     <div
+                        key={`${baseKey}_v`}
                         style={{
                             position: "absolute",
                             width: 1,
@@ -217,6 +222,7 @@ function DisassemblyJumps(props) {
                 // Horizontal lines
                 elements.push(
                     <div
+                        key={`${baseKey}_h1`}
                         style={{
                             position: "absolute",
                             width:
@@ -232,6 +238,7 @@ function DisassemblyJumps(props) {
 
                 elements.push(
                     <div
+                        key={`${baseKey}_h2`}
                         style={{
                             position: "absolute",
                             width:
@@ -267,10 +274,15 @@ function DisassemblyView(props) {
     const viewStorage = useRef({ positions: {} });
 
     function handleDisassemblyEnd() {
+        const size = Object.keys(viewStorage.current.positions).length;
+
         // When the last element in the disassembly view is rendered
-        // We trigger a re-render of the jump view
-        viewStorage.current.setJumps &&
-            viewStorage.current.setJumps(viewStorage.current.positions);
+        // We trigger a re-render of the jump view. Only if there are
+        // jumps to render.
+        if (size) {
+            viewStorage.current.setJumps &&
+                viewStorage.current.setJumps(viewStorage.current.positions);
+        }
     }
 
     function renderDisassembly() {
@@ -285,16 +297,29 @@ function DisassemblyView(props) {
             const label = disassembly.labels[e.addr];
             const func = functionsByAddr[e.addr];
 
+            let key = `${e.addr}_${e.bytecode}`;
+
             if (func) {
-                elements.push(<DisassemblyEmptyLine />);
-                elements.push(<DisassemblyLineLabel name={func.name} />);
+                elements.push(<DisassemblyEmptyLine key={key + "_empty"} />);
+                elements.push(
+                    <DisassemblyLineLabel
+                        key={key + `_${func.name}`}
+                        name={func.name}
+                    />
+                );
             } else if (label) {
-                elements.push(<DisassemblyEmptyLine />);
-                elements.push(<DisassemblyLineLabel name={label.name} />);
+                elements.push(<DisassemblyEmptyLine key={key + "_empty"} />);
+                elements.push(
+                    <DisassemblyLineLabel
+                        key={key + `_${label.name}`}
+                        name={label.name}
+                    />
+                );
             }
 
             elements.push(
                 <DisassemblyLineOpcode
+                    key={key}
                     pc={vmRegisters.pc}
                     opcode={e}
                     viewStorage={viewStorage.current}
@@ -303,7 +328,10 @@ function DisassemblyView(props) {
         }
 
         elements.push(
-            <DisassemblyEnd onDisassemblyEnd={handleDisassemblyEnd} />
+            <DisassemblyEnd
+                key="internal_disassembly_end"
+                onDisassemblyEnd={handleDisassemblyEnd}
+            />
         );
 
         return elements;
@@ -329,6 +357,21 @@ export default function Home() {
     const [vmRegisters, setVmRegisters] = useState({
         pc: 0,
     });
+    const [evmCode, setEvmCode] = useState("");
+    const [disassembly, setDisassembly] = useState(null);
+
+    function getValidOrEmptyDisassembly(disassembly) {
+        if (!disassembly) {
+            return {
+                functions: [],
+                opcodes: [],
+                labels: [],
+                jumps: [],
+            };
+        } else {
+            return disassembly;
+        }
+    }
 
     async function handleDebuggerStep() {
         const res1 = await fetch("/api/debugger/step");
@@ -349,6 +392,16 @@ export default function Home() {
         }));
     }
 
+    async function handleDebuggerLoad() {
+        const res = await fetch("/api/code/load");
+        const code = await res.json();
+
+        // Start disassembly
+        // TODO: disassembly should be done on the backend
+        setEvmCode(code.byteCode);
+        setDisassembly(disasembler.disassemble(code.byteCode));
+    }
+
     return (
         <div className={styles.container}>
             <Head>
@@ -364,26 +417,30 @@ export default function Home() {
                 <div>
                     <div className="font-mono text-sm italic">ethersight</div>
                     <DisassemblyView
-                        disassembly={disassembly}
+                        disassembly={getValidOrEmptyDisassembly(disassembly)}
                         vmRegisters={vmRegisters}
                     ></DisassemblyView>
                 </div>
 
                 <div className="p-2">
-                    <div
-                        className="cursor-pointer bg-white text-black font-mono p-2 m-2"
-                        onClick={handleDebuggerStep}
-                    >
-                        Step
-                    </div>
-                    <div
-                        className="cursor-pointer bg-white text-black font-mono p-2 m-2"
-                        onClick={handleDebuggerReset}
-                    >
-                        Reset
-                    </div>
+                    <Button onClick={handleDebuggerLoad} name="Load" />
+                    <Button onClick={handleDebuggerStep} name="Step" />
+                    <Button onClick={handleDebuggerReset} name="Reset" />
                 </div>
             </div>
+        </div>
+    );
+}
+
+function Button(props) {
+    const { name, onClick } = props;
+
+    return (
+        <div
+            className="cursor-pointer bg-white text-black font-mono p-2 m-2"
+            onClick={onClick}
+        >
+            {name}
         </div>
     );
 }
