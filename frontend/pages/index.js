@@ -54,7 +54,7 @@ function DisassemblyLineOpcode(props) {
         if (ref.current) {
             const rect = ref.current.getBoundingClientRect();
             viewStorage.positions[opcode.addr] = {
-                top: rect.top + window.scrollY + rect.height / 2,
+                top: rect.top + rect.height / 2, // /!\ dependent on the scroll of the parent
                 height: rect.height,
             };
         }
@@ -262,6 +262,7 @@ function DisassemblyView(props) {
     const { disassembly, vmRegisters } = props;
 
     const viewStorage = useRef({ positions: {} });
+    const ref = useRef();
 
     function handleDisassemblyEnd() {
         const size = Object.keys(viewStorage.current.positions).length;
@@ -270,8 +271,20 @@ function DisassemblyView(props) {
         // We trigger a re-render of the jump view. Only if there are
         // jumps to render.
         if (size) {
+            // Offset the positions by the current scrolling Y
+            let scrollY = ref?.current?.scrollTop || 0;
+
+            const positions = {};
+            for (const e in viewStorage.current.positions) {
+                positions[e] = {
+                    ...viewStorage.current.positions[e],
+                };
+
+                positions[e].top += scrollY;
+            }
+
             viewStorage.current.setJumps &&
-                viewStorage.current.setJumps(viewStorage.current.positions);
+                viewStorage.current.setJumps(positions);
         }
     }
 
@@ -329,6 +342,7 @@ function DisassemblyView(props) {
 
     return (
         <div
+            ref={ref}
             className="flex overflow-y-auto overflow-hidden border"
             style={{ width: 800, height: 900 }}
         >
@@ -365,6 +379,44 @@ function StackView(props) {
         >
             <div className="flex flex-col font-mono text-sm text-white p-2">
                 {renderStack()}
+            </div>
+        </div>
+    );
+}
+
+function MemoryView(props) {
+    const { memory } = props;
+
+    const memoryElements = [];
+
+    if (memory.data) {
+        for (let i = 0; i < memory.data.length; i++) {
+            if (i !== 0 && i % 16 === 0) memoryElements.push(<div />);
+
+            const addr = i.toString(16);
+
+            if (i % 16 === 0) {
+                // TODO: alignment
+                memoryElements.push(
+                    <span className="mr-1" style={{ color: cTheme["Comment"] }}>
+                        0x{addr}
+                    </span>
+                );
+            }
+
+            memoryElements.push(
+                <span className="mr-1">{byteToHex(memory.data[i])}</span>
+            );
+        }
+    }
+
+    return (
+        <div
+            className="overflow-y-auto overflow-hidden border"
+            style={{ width: 450, height: 400 }}
+        >
+            <div className="font-mono text-sm text-white p-2">
+                {memoryElements}
             </div>
         </div>
     );
@@ -462,7 +514,12 @@ export default function Home() {
                             )}
                             vmRegisters={vmRegisters}
                         ></DisassemblyView>
-                        <StackView stack={vmRegisters.stack}></StackView>
+                        <div className="flex flex-col">
+                            <StackView stack={vmRegisters.stack}></StackView>
+                            <MemoryView
+                                memory={vmRegisters.memory}
+                            ></MemoryView>
+                        </div>
                     </div>
                 </div>
 
