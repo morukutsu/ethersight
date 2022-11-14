@@ -73,7 +73,7 @@ class VM {
             //data: "0x57de26a4000000000000000000000000",
             //data: "0x23b872dd000000000000000000000000",
             // CORRECT
-            //data: Buffer.from("57de26a4000000000000000000000000", "hex"),
+            data: Buffer.from("c2985578000000000000000000000000", "hex"),
         })
             .then((results) => {
                 console.log(`Returned: ${results.returnValue.toString("hex")}`);

@@ -21,7 +21,21 @@ let currentByteCode = "";
 //
 
 const bytecodes = {};
-let vm, disassembly, serialized;
+let vm, disassembly, serialized, currentCodeSection;
+
+const dbgState = {};
+
+function changeCodeSection(index) {
+    const codeStart = dbgState.disassembly.codeSections[index].start;
+    const codeStartBytes = codeStart * 2;
+
+    const fullByteCode = bytecodes[Object.keys(bytecodes)[0]];
+    currentByteCode = "0x" + fullByteCode.substr(codeStartBytes);
+    currentCodeSection = index;
+
+    console.log("change section", index, "code start", codeStart);
+    console.log(currentByteCode);
+}
 
 async function wrapper() {
     // Load all the bytecode from the list of samples
@@ -39,8 +53,16 @@ async function wrapper() {
         console.error(e);
     }
 
-    // Select one bytecode
-    currentByteCode = "0x" + bytecodes[Object.keys(bytecodes)[0]];
+    // Perform initial disassembly of the full bytecode
+    {
+        const fullByteCode = "0x" + bytecodes[Object.keys(bytecodes)[0]];
+        dbgState.disassembly = disasembler.disassemble(fullByteCode);
+        dbgState.serializedDisassembly = disasembler.serialize(
+            dbgState.disassembly
+        );
+    }
+
+    changeCodeSection(0);
 
     disassembly = disasembler.disassemble(currentByteCode);
     serialized = disasembler.serialize(disassembly);
@@ -57,6 +79,22 @@ app.get("/", (req, res) => {
 
 app.get("/code/load", (req, res) => {
     res.send({ byteCode: currentByteCode, disassembly: serialized });
+});
+
+app.get("/code/changeSection/:section", (req, res) => {
+    const section = parseInt(req.params.section);
+    currentCodeSection = section;
+    changeCodeSection(section);
+
+    // After change section, must update the disasm and vm state
+    // TODO: find a new function to automate this
+    disassembly = disasembler.disassemble(currentByteCode);
+    serialized = disasembler.serialize(disassembly);
+    vm = new VM(currentByteCode);
+
+    vm.start();
+
+    res.send({});
 });
 
 app.get("/debugger/start", async (req, res) => {

@@ -361,7 +361,7 @@ function StackView(props) {
     return (
         <div
             className="overflow-y-auto overflow-hidden border"
-            style={{ width: 400, height: 400 }}
+            style={{ width: 450, height: 400 }}
         >
             <div className="flex flex-col font-mono text-sm text-white p-2">
                 {renderStack()}
@@ -378,6 +378,7 @@ export default function Home() {
     });
     const [evmCode, setEvmCode] = useState("");
     const [disassembly, setDisassembly] = useState(null);
+    const [currentSection, setCurrentSection] = useState(0);
 
     function getValidOrEmptyDisassembly(disassembly) {
         if (!disassembly) {
@@ -426,6 +427,20 @@ export default function Home() {
         setDisassembly(disassembly);
     }
 
+    async function handleDebuggerChangeSection() {
+        let nextSection;
+
+        if (currentSection === 0) nextSection = 1;
+        else nextSection = 0;
+
+        setCurrentSection(nextSection);
+
+        await fetch(`/api/code/changeSection/${nextSection}`);
+
+        // Reload code
+        await handleDebuggerLoad();
+    }
+
     return (
         <div className={styles.container}>
             <Head>
@@ -455,6 +470,10 @@ export default function Home() {
                     <Button onClick={handleDebuggerLoad} name="Load" />
                     <Button onClick={handleDebuggerStep} name="Step" />
                     <Button onClick={handleDebuggerReset} name="Reset" />
+                    <Button
+                        onClick={handleDebuggerChangeSection}
+                        name="Change Section"
+                    />
                 </div>
             </div>
         </div>

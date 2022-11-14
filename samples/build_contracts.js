@@ -27,6 +27,9 @@ async function main() {
                             "*": ["*"],
                         },
                     },
+                    optimizer: {
+                        enabled: true,
+                    },
                 },
             };
 
@@ -34,13 +37,21 @@ async function main() {
             const outputBytecodePath = `${BUILD_PATH}/${file}.hex`;
 
             const output = JSON.parse(solc.compile(JSON.stringify(input)));
+
+            let hasCompilationError = false;
+
             if (output.errors) {
-                for (const e of output.errors) console.log(e.formattedMessage);
+                // Check if we have a fatal error
+                for (const e of output.errors) {
+                    if (e.type === "Error") hasCompilationError = true;
+
+                    console.log(e.formattedMessage);
+                }
 
                 if (fs.existsSync(outputBytecodePath))
                     fs.rmSync(outputBytecodePath);
 
-                continue;
+                if (hasCompilationError) continue;
             }
 
             // Assuming there is one contract per file, for now
