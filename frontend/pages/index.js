@@ -48,7 +48,6 @@ function DisassemblyLineOpcode(props) {
             ? `0x${opcode.operandValue.toString(16)}`
             : opcode.operandValue;
 
-    console.log(operandDisplay);
     const opcodeColor = getOpcodeColor(opcode.bytecode);
 
     useLayoutEffect(() => {
@@ -331,7 +330,7 @@ function DisassemblyView(props) {
     return (
         <div
             className="flex overflow-y-auto overflow-hidden border"
-            style={{ width: 600, height: 800 }}
+            style={{ width: 800, height: 900 }}
         >
             <DisassemblyJumps
                 disassembly={disassembly}
@@ -344,9 +343,38 @@ function DisassemblyView(props) {
     );
 }
 
+function StackView(props) {
+    const { stack } = props;
+
+    console.log(stack);
+
+    const activeClass = "";
+
+    function renderStack() {
+        return stack.map((e, i) => (
+            <div key={i} className={`hover:bg-slate-400 ${activeClass}`}>
+                0x{e.toString(16)}
+            </div>
+        ));
+    }
+
+    return (
+        <div
+            className="overflow-y-auto overflow-hidden border"
+            style={{ width: 400, height: 400 }}
+        >
+            <div className="flex flex-col font-mono text-sm text-white p-2">
+                {renderStack()}
+            </div>
+        </div>
+    );
+}
+
 export default function Home() {
     const [vmRegisters, setVmRegisters] = useState({
         pc: 0,
+        stack: [],
+        memory: new Buffer([]),
     });
     const [evmCode, setEvmCode] = useState("");
     const [disassembly, setDisassembly] = useState(null);
@@ -368,9 +396,12 @@ export default function Home() {
         const res1 = await fetch("/api/debugger/step");
         const res2 = await fetch("/api/debugger/state");
         const state = await res2.json();
+        console.log(state);
         setVmRegisters((prev) => ({
             ...prev,
             pc: state.pc,
+            stack: state.stack,
+            memory: state.memory,
         }));
     }
 
@@ -378,6 +409,8 @@ export default function Home() {
         const res1 = await fetch("/api/debugger/start");
         setVmRegisters((prev) => ({
             pc: 0,
+            stack: [],
+            memory: new Buffer([]),
         }));
     }
 
@@ -407,10 +440,15 @@ export default function Home() {
             <div className="flex bg-black w-screen h-screen">
                 <div>
                     <div className="font-mono text-sm italic">ethersight</div>
-                    <DisassemblyView
-                        disassembly={getValidOrEmptyDisassembly(disassembly)}
-                        vmRegisters={vmRegisters}
-                    ></DisassemblyView>
+                    <div className="flex">
+                        <DisassemblyView
+                            disassembly={getValidOrEmptyDisassembly(
+                                disassembly
+                            )}
+                            vmRegisters={vmRegisters}
+                        ></DisassemblyView>
+                        <StackView stack={vmRegisters.stack}></StackView>
+                    </div>
                 </div>
 
                 <div className="p-2">
