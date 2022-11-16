@@ -3,6 +3,7 @@ import styles from "../styles/Home.module.css";
 import disassembler from "evm-disasm-js";
 import monokai from "../monokai.json";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { connectWebsocket } from "../lib/websocket";
 
 // Theme
 // TODO: handle multiple themes
@@ -344,7 +345,7 @@ function DisassemblyView(props) {
         <div
             ref={ref}
             className="flex overflow-y-auto overflow-hidden border"
-            style={{ width: 800, height: 900 }}
+            style={{ width: 500, height: 800 }}
         >
             <DisassemblyJumps
                 disassembly={disassembly}
@@ -359,8 +360,6 @@ function DisassemblyView(props) {
 
 function StackView(props) {
     const { stack } = props;
-
-    console.log(stack);
 
     const activeClass = "";
 
@@ -432,6 +431,20 @@ export default function Home() {
     const [disassembly, setDisassembly] = useState(null);
     const [currentSection, setCurrentSection] = useState(0);
 
+    useEffect(() => {
+        connectWebsocket();
+    }, []);
+
+    function websocketEventHandler(event) {
+        // Parse JSON messages from the debugger backend
+        try {
+            const msg = JSON.parse(event.data);
+            console.log(msg);
+        } catch (e) {
+            console.error(e);
+        }
+    }
+
     function getValidOrEmptyDisassembly(disassembly) {
         if (!disassembly) {
             return {
@@ -443,6 +456,10 @@ export default function Home() {
         } else {
             return disassembly;
         }
+    }
+
+    async function handleDebuggerRun() {
+        await fetch("/api/debugger/run");
     }
 
     async function handleDebuggerStep() {
@@ -525,6 +542,7 @@ export default function Home() {
 
                 <div className="p-2">
                     <Button onClick={handleDebuggerLoad} name="Load" />
+                    <Button onClick={handleDebuggerRun} name="Run" />
                     <Button onClick={handleDebuggerStep} name="Step" />
                     <Button onClick={handleDebuggerReset} name="Reset" />
                     <Button

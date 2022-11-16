@@ -8,6 +8,7 @@ const { Chain, Common, Hardfork } = require("@ethereumjs/common");
 const { EEI } = require("@ethereumjs/vm");
 const { EVM } = require("@ethereumjs/evm");
 const { DefaultStateManager } = require("@ethereumjs/statemanager");
+const EventEmitter = require("events");
 
 class WaitingGadget {
     constructor() {
@@ -20,6 +21,9 @@ class WaitingGadget {
 class VM {
     constructor(code) {
         this.vmReadyWaiter = new WaitingGadget();
+
+        this.isStepping = true; // if true, the debugger will stop after each instruction
+        this.eventEmitter = new EventEmitter();
 
         const wrapper = async () => {
             const common = new Common({
@@ -54,16 +58,21 @@ class VM {
         this.afterStep = new WaitingGadget();
 
         evm.events.on("step", (data, end) => {
-            this.currentStep = data;
-            this.afterStep.resolve(data);
+            if (this.isStepping) {
+                this.currentStep = data;
+                this.afterStep.resolve(data);
 
-            console.log(
-                `${data.pc.toString(16)} Op: ${data.opcode.name}\tStack: ${
-                    data.stack
-                }`
-            );
+                console.log(
+                    `${data.pc.toString(16)} Op: ${data.opcode.name}\tStack: ${
+                        data.stack
+                    }`
+                );
 
-            this.vmStepFunction = end;
+                this.vmStepFunction = end;
+                this.eventEmitter.emit("vm_step", "data");
+            } else {
+                end();
+            }
         });
 
         evm.runCode({
@@ -80,18 +89,33 @@ class VM {
                 console.log(`gasUsed: ${results.executionGasUsed.toString()}`);
 
                 this.isEnd = true;
-                this.afterStep.resolve();
+
+                if (this.isStepping) this.afterStep.resolve();
+
+                this.eventEmitter.emit("vm_exit", {});
             })
             .catch(console.error);
     }
 
-    async step() {
-        this.lastStepState = await this.afterStep.promise;
-
-        if (this.isEnd) return true;
-
-        this.afterStep = new WaitingGadget();
+    async run() {
+        // If the VM was stepping: unlock it
         this.vmStepFunction && this.vmStepFunction();
+
+        // Disable stepping mode (useful when transitionning for "Step" to "Run")
+        this.isStepping = false;
+        this.afterStep = null;
+        this.vmStepFunction = null;
+    }
+
+    async step() {
+        if (this.isStepping) {
+            this.lastStepState = await this.afterStep.promise;
+
+            if (this.isEnd) return true;
+
+            this.afterStep = new WaitingGadget();
+            this.vmStepFunction && this.vmStepFunction();
+        }
     }
 
     state() {

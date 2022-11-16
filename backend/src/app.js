@@ -1,6 +1,9 @@
 const express = require("express");
 const disasembler = require("evm-disasm-js");
 const fs = require("fs");
+const { WebSocketServer } = require("ws");
+const { v4: uuidv4 } = require("uuid");
+
 const { readdir } = require("node:fs/promises");
 
 const VM = require("./lib/vm");
@@ -17,6 +20,15 @@ const bytes =
 
 let currentByteCode = "";
 let BYTECODE_INDEX = 1;
+let wss;
+const clients = {};
+
+function sendToClient(message) {
+    const str = JSON.stringify(message);
+    for (let id in clients) {
+        clients[id].send(str);
+    }
+}
 
 //console.log(disassember.serialize(disassembly));
 //
@@ -25,6 +37,24 @@ const bytecodes = {};
 let vm, disassembly, serialized, currentCodeSection;
 
 const dbgState = {};
+
+const events = [];
+
+class WaitingGadget {
+    constructor() {
+        this.promise = new Promise((resolve) => {
+            this.resolve = resolve;
+        });
+    }
+}
+
+let pendingEvent = new WaitingGadget();
+
+function addEvent(event) {
+    events.push(event);
+    pendingEvent.resolve();
+    pendingEvent = new WaitingGadget();
+}
 
 function changeCodeSection(index) {
     const codeStart = dbgState.disassembly.codeSections[index].start;
@@ -36,6 +66,20 @@ function changeCodeSection(index) {
 
     console.log("change section", index, "code start", codeStart);
     console.log(currentByteCode);
+}
+
+async function createVM(code) {
+    vm = new VM(code);
+
+    vm.eventEmitter.on("vm_exit", (e) => {
+        sendToClient({ name: "vm_exit" });
+    });
+
+    vm.eventEmitter.on("vm_step", (e) => {
+        sendToClient({ name: "vm_step" });
+    });
+
+    await vm.start();
 }
 
 async function wrapper() {
@@ -68,9 +112,7 @@ async function wrapper() {
 
     disassembly = disasembler.disassemble(currentByteCode);
     serialized = disasembler.serialize(disassembly);
-    vm = new VM(currentByteCode);
-
-    await vm.start();
+    await createVM(currentByteCode);
 }
 
 wrapper();
@@ -92,16 +134,19 @@ app.get("/code/changeSection/:section", (req, res) => {
     // TODO: find a new function to automate this
     disassembly = disasembler.disassemble(currentByteCode);
     serialized = disasembler.serialize(disassembly);
-    vm = new VM(currentByteCode);
-
-    vm.start();
+    createVM(currentByteCode);
 
     res.send({});
 });
 
+app.get("/debugger/run", async (req, res) => {
+    await vm.run();
+    res.send({});
+});
+
 app.get("/debugger/start", async (req, res) => {
-    vm = new VM(currentByteCode);
-    await vm.start();
+    await createVM(currentByteCode);
+
     res.send({});
 });
 
@@ -127,6 +172,83 @@ app.get("/debugger/state", async (req, res) => {
     });
 });
 
-app.listen(port, () => {
+// Server start
+// ------------
+const server = app.listen(port, () => {
     console.log(`Example app listening on port ${port}`);
+});
+
+wss = new WebSocketServer({ server });
+
+const CLIENT_PING_INTERVAL = 10 * 1000; // ping clients every 10s
+const CLIENT_ALIVE_CHECK_INTERVAL = 5 * 1000;
+const CLIENT_DISCONNECTED_TIMEOUT = 15 * 1000;
+
+async function dropClient(clientId) {
+    if (!clients[clientId]) return;
+
+    console.log(
+        "[Disconnect] dropping client",
+        clientId,
+        clients[clientId]._clientIp
+    );
+    clearInterval(clients[clientId]._clientPingRef);
+    delete clients[clientId];
+}
+
+setInterval(() => {
+    const ts = Date.now();
+    for (const clientId of Object.keys(clients)) {
+        if (
+            ts - clients[clientId]._clientLastPongTs >
+            CLIENT_DISCONNECTED_TIMEOUT
+        ) {
+            dropClient(clientId);
+        }
+    }
+}, CLIENT_ALIVE_CHECK_INTERVAL);
+
+function onMessage(ws, message) {
+    try {
+        const decoded = JSON.parse(message);
+        if (decoded.type === "PING") {
+            ws.send(JSON.stringify({ type: "PONG" }));
+        }
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+wss.on("connection", function connection(ws, req) {
+    // Register client connection/socket
+    const id = uuidv4();
+    ws._clientId = id;
+    ws._clientLastPongTs = Date.now();
+
+    console.log("[Websocket] Client connected", id);
+
+    const ip = (
+        req.headers["x-forwarded-for"] ||
+        req.socket.remoteAddress ||
+        ""
+    )
+        .split(",")[0]
+        .trim();
+    ws._clientIp = ip || req.socket.remoteAddress;
+    clients[id] = ws;
+
+    // Handlers
+    ws.on("message", (msg) => onMessage(ws, msg));
+    ws.on("pong", () => {
+        ws._clientLastPongTs = Date.now();
+    });
+
+    const pingRef = setInterval(() => {
+        ws.ping(() => {});
+    }, CLIENT_PING_INTERVAL);
+    ws._clientPingRef = pingRef;
+
+    ws.on("close", async function close() {
+        dropClient(id);
+    });
 });
