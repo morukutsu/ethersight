@@ -3,7 +3,7 @@ import styles from "../styles/Home.module.css";
 import disassembler from "evm-disasm-js";
 import monokai from "../monokai.json";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { connectWebsocket } from "../lib/websocket";
+import { connectWebsocket, subscribe, unsubscribe } from "../lib/websocket";
 
 // Theme
 // TODO: handle multiple themes
@@ -433,16 +433,20 @@ export default function Home() {
 
     useEffect(() => {
         connectWebsocket();
+        subscribe("message", debuggerMessageHandler);
+
+        return () => {
+            unsubscribe("message", debuggerMessageHandler);
+        };
     }, []);
 
-    function websocketEventHandler(event) {
-        // Parse JSON messages from the debugger backend
-        try {
-            const msg = JSON.parse(event.data);
-            console.log(msg);
-        } catch (e) {
-            console.error(e);
+    async function debuggerMessageHandler(msg) {
+        if (msg.type === "vm_breakpoint") {
+            // Reload the debugger state, assume the debugger is in a break state?
+            await synchronizeWithDebugger();
         }
+
+        console.log(msg);
     }
 
     function getValidOrEmptyDisassembly(disassembly) {
@@ -462,8 +466,7 @@ export default function Home() {
         await fetch("/api/debugger/run");
     }
 
-    async function handleDebuggerStep() {
-        const res1 = await fetch("/api/debugger/step");
+    async function synchronizeWithDebugger() {
         const res2 = await fetch("/api/debugger/state");
         const state = await res2.json();
         console.log(state);
@@ -473,6 +476,11 @@ export default function Home() {
             stack: state.stack,
             memory: state.memory,
         }));
+    }
+
+    async function handleDebuggerStep() {
+        const res1 = await fetch("/api/debugger/step");
+        await synchronizeWithDebugger();
     }
 
     async function handleDebuggerReset() {

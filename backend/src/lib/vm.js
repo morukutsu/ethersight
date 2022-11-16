@@ -22,8 +22,9 @@ class VM {
     constructor(code) {
         this.vmReadyWaiter = new WaitingGadget();
 
-        this.isStepping = true; // if true, the debugger will stop after each instruction
+        this.isStepping = false; // if true, the debugger will stop after each instruction
         this.eventEmitter = new EventEmitter();
+        this.breakpoints = {};
 
         const wrapper = async () => {
             const common = new Common({
@@ -58,6 +59,13 @@ class VM {
         this.afterStep = new WaitingGadget();
 
         evm.events.on("step", (data, end) => {
+            const isBreakpoint = this.breakpoints[data.pc];
+            if (isBreakpoint) {
+                // Break code here
+                this.isStepping = true;
+                this.eventEmitter.emit("vm_breakpoint", { pc: data.pc });
+            }
+
             if (this.isStepping) {
                 this.currentStep = data;
                 this.afterStep.resolve(data);
@@ -103,7 +111,7 @@ class VM {
 
         // Disable stepping mode (useful when transitionning for "Step" to "Run")
         this.isStepping = false;
-        this.afterStep = null;
+        this.afterStep = new WaitingGadget();
         this.vmStepFunction = null;
     }
 
@@ -123,6 +131,10 @@ class VM {
         //console.log(Object.keys(this.evm.eei._stateManager));
 
         return { ...this.currentStep };
+    }
+
+    addBreakpoint(addr) {
+        this.breakpoints[addr] = true;
     }
 }
 

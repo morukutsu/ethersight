@@ -72,12 +72,18 @@ async function createVM(code) {
     vm = new VM(code);
 
     vm.eventEmitter.on("vm_exit", (e) => {
-        sendToClient({ name: "vm_exit" });
+        sendToClient({ type: "vm_exit" });
     });
 
     vm.eventEmitter.on("vm_step", (e) => {
-        sendToClient({ name: "vm_step" });
+        sendToClient({ type: "vm_step" });
     });
+
+    vm.eventEmitter.on("vm_breakpoint", (e) => {
+        sendToClient({ type: "vm_breakpoint", ...e });
+    });
+
+    vm.addBreakpoint(0x4c);
 
     await vm.start();
 }
