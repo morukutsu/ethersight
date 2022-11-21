@@ -90,11 +90,14 @@ function DisassemblyEnd(props) {
 }
 
 function DisassemblyJumps(props) {
-    const { disassembly, viewStorage } = props;
+    const { disassembly, viewStorage, pc, dynamicJumps } = props;
+
+    // TODO: the variable name is not OK: this is not a list of jumps but a list of positions of each instruction?
     const [jumps, setJumps] = useState({});
 
     viewStorage.setJumps = setJumps;
 
+    // TODO: cache this to make it faster
     function getOpcodeByAddr(addr) {
         const idx = disassembly.opcodes.findIndex((e) => e.addr == addr);
         return disassembly.opcodes[idx];
@@ -143,12 +146,20 @@ function DisassemblyJumps(props) {
         // To avoid displaying overlapping horizontal lines, keep track of which ones overlaps
         const horizontalOverlapsAtYPosition = {};
 
-        for (let i = 0; i < disassembly.jumps.length; i++) {
-            const jump = disassembly.jumps[i];
+        // Merge static and dynamic jumps
+        const allJumps = disassembly.jumps.concat(dynamicJumps);
+
+        for (let i = 0; i < allJumps.length; i++) {
+            const jump = allJumps[i];
             const opFrom1 = getOpcodeByAddr(jump.from);
             const opDest1 = getOpcodeByAddr(jump.addr);
             const f1 = jumps[opFrom1.addr];
             const d1 = jumps[opDest1.addr];
+
+            let active = false;
+            if (pc === jump.from || pc === jump.addr) {
+                active = true;
+            }
 
             if (f1 && d1) {
                 let ay1 = f1.top < d1.top ? f1.top : d1.top;
@@ -162,7 +173,7 @@ function DisassemblyJumps(props) {
                     horizontalOverlapsAtYPosition[ay1] = 0;
                 else horizontalOverlapsAtYPosition[ay1]++;
 
-                const jumpDrawInfo = { y1: ay1, y2: ay2, jump };
+                const jumpDrawInfo = { y1: ay1, y2: ay2, jump, active };
                 addJump(jumpDrawInfo);
             }
         }
@@ -197,6 +208,10 @@ function DisassemblyJumps(props) {
                     16
                 )}_${jump.jump.from.toString(16)}`;
 
+                let lineColor = jump.active
+                    ? cTheme["Function argument"]
+                    : cTheme["Function name"];
+
                 elements.push(
                     <div
                         key={`${baseKey}_v`}
@@ -204,7 +219,7 @@ function DisassemblyJumps(props) {
                             position: "absolute",
                             width: 1,
                             height: jump.y2 - jump.y1,
-                            backgroundColor: cTheme["Function name"],
+                            backgroundColor: lineColor,
                             top: jump.y1 + yOffset,
                             left: maxSize - currentX - COLUMN_SIZE,
                         }}
@@ -221,7 +236,7 @@ function DisassemblyJumps(props) {
                                 (columnIndex + 1) * COLUMN_SIZE -
                                 COLUMN_SIZE / 2,
                             height: 1,
-                            backgroundColor: cTheme["Function name"],
+                            backgroundColor: lineColor,
                             top: jump.y1 + yOffset,
                             left: maxSize - currentX - COLUMN_SIZE,
                         }}
@@ -237,7 +252,7 @@ function DisassemblyJumps(props) {
                                 (columnIndex + 1) * COLUMN_SIZE -
                                 COLUMN_SIZE / 2,
                             height: 1,
-                            backgroundColor: cTheme["Function name"],
+                            backgroundColor: lineColor,
                             top: jump.y2 + yOffset,
                             left: maxSize - currentX - COLUMN_SIZE,
                         }}
@@ -260,7 +275,7 @@ function DisassemblyJumps(props) {
 }
 
 function DisassemblyView(props) {
-    const { disassembly, vmRegisters } = props;
+    const { disassembly, vmRegisters, dynamicJumps } = props;
 
     const viewStorage = useRef({ positions: {} });
     const ref = useRef();
@@ -367,6 +382,8 @@ function DisassemblyView(props) {
             <DisassemblyJumps
                 disassembly={disassembly}
                 viewStorage={viewStorage.current}
+                dynamicJumps={dynamicJumps}
+                pc={vmRegisters.pc}
             />
             <div className="font-mono text-sm text-white ">
                 {renderDisassembly()}
@@ -446,6 +463,7 @@ export default function Home() {
     });
     const [evmCode, setEvmCode] = useState("");
     const [disassembly, setDisassembly] = useState(null);
+    const [dynamicJumps, setDynamicJumps] = useState([]);
     const [currentSection, setCurrentSection] = useState(0);
 
     useEffect(() => {
@@ -479,6 +497,45 @@ export default function Home() {
         }
     }
 
+    function calculateDynamicJumps(state) {
+        console.log("Calculating dynamic jumps");
+
+        // TODO: cache this to make it faster
+        function getOpcodeByAddr(addr) {
+            const idx = disassembly.opcodes.findIndex((e) => e.addr == addr);
+            return disassembly.opcodes[idx];
+        }
+
+        function getJumpByAddr(addr) {
+            const idx = disassembly.jumps.findIndex((e) => e.addr == addr);
+            return disassembly.jumps[idx];
+        }
+
+        //
+
+        const currentOpcode = getOpcodeByAddr(state.pc);
+        if (currentOpcode.opcode === "JUMP") {
+            // TODO: the value in the stack can be large...
+            const jumpAddr = parseInt(state.stack[state.stack.length - 1], 16);
+
+            // Make sure the code can jump to this address
+            const targetOpcode = getOpcodeByAddr(jumpAddr);
+            if (targetOpcode.opcode === "JUMPDEST") {
+                // Check if we already have this jump in our database or not
+                const jump = getJumpByAddr(targetOpcode.addr);
+                if (jump) {
+                    console.log("Static jump");
+                } else {
+                    setDynamicJumps({
+                        addr: jumpAddr,
+                        from: currentOpcode.addr,
+                    });
+                    console.log("Dynamic jump to", jumpAddr);
+                }
+            }
+        }
+    }
+
     async function handleDebuggerRun() {
         await fetch("/api/debugger/run");
     }
@@ -492,6 +549,7 @@ export default function Home() {
             stack: state.stack,
             memory: state.memory,
         }));
+        calculateDynamicJumps(state);
     }
 
     async function handleDebuggerStep() {
@@ -506,6 +564,7 @@ export default function Home() {
             stack: [],
             memory: new Buffer([]),
         }));
+        setDynamicJumps([]);
     }
 
     async function handleDebuggerLoad() {
@@ -516,6 +575,8 @@ export default function Home() {
 
         const disassembly = disassembler.unserialize(code.disassembly);
         setDisassembly(disassembly);
+
+        setDynamicJumps([]);
     }
 
     async function handleDebuggerChangeSection() {
@@ -551,6 +612,7 @@ export default function Home() {
                             disassembly={getValidOrEmptyDisassembly(
                                 disassembly
                             )}
+                            dynamicJumps={dynamicJumps}
                             vmRegisters={vmRegisters}
                         ></DisassemblyView>
                         <div className="flex flex-col">
