@@ -53,6 +53,7 @@ function DisassemblyLineOpcode(props) {
 
     useLayoutEffect(() => {
         if (ref.current) {
+            // Positions are relative to the view port
             const rect = ref.current.getBoundingClientRect();
             viewStorage.positions[opcode.addr] = {
                 top: rect.top + rect.height / 2, // /!\ dependent on the scroll of the parent
@@ -248,15 +249,14 @@ function DisassemblyJumps(props) {
             columnIndex++;
         }
 
-        return <div style={{ width: maxSize }}>{elements}</div>;
+        return (
+            <div className="relative" style={{ width: maxSize }}>
+                {elements}
+            </div>
+        );
     }
 
-    // TODO: why offset -22 when position is relative?
-    return (
-        <div className="relative" style={{ top: -22 }}>
-            {renderJumps()}
-        </div>
-    );
+    return <div>{renderJumps()}</div>;
 }
 
 function DisassemblyView(props) {
@@ -267,12 +267,15 @@ function DisassemblyView(props) {
 
     function handleDisassemblyEnd() {
         const size = Object.keys(viewStorage.current.positions).length;
+        const containerPosition = ref.current?.getBoundingClientRect();
 
         // When the last element in the disassembly view is rendered
         // We trigger a re-render of the jump view. Only if there are
         // jumps to render.
-        if (size) {
+        if (size && containerPosition) {
             // Offset the positions by the current scrolling Y
+            // Positions are relative to the viewport: set them as relative to the container
+
             let scrollY = ref?.current?.scrollTop || 0;
 
             const positions = {};
@@ -281,11 +284,25 @@ function DisassemblyView(props) {
                     ...viewStorage.current.positions[e],
                 };
 
-                positions[e].top += scrollY;
+                positions[e].top += scrollY - containerPosition.y;
             }
 
             viewStorage.current.setJumps &&
                 viewStorage.current.setJumps(positions);
+        }
+
+        // If the cursor is out of the view, scroll the container to the cursor
+        const pcCursorPosition = viewStorage.current.positions[vmRegisters.pc];
+        if (pcCursorPosition) {
+            if (
+                pcCursorPosition.top < 0 ||
+                pcCursorPosition.top > containerPosition.height
+            ) {
+                ref.current.scrollTop =
+                    ref.current.scrollTop +
+                    pcCursorPosition.top -
+                    pcCursorPosition.height * 1.5;
+            }
         }
     }
 
@@ -446,7 +463,7 @@ export default function Home() {
             await synchronizeWithDebugger();
         }
 
-        console.log(msg);
+        //console.log(msg);
     }
 
     function getValidOrEmptyDisassembly(disassembly) {
@@ -469,7 +486,6 @@ export default function Home() {
     async function synchronizeWithDebugger() {
         const res2 = await fetch("/api/debugger/state");
         const state = await res2.json();
-        console.log(state);
         setVmRegisters((prev) => ({
             ...prev,
             pc: state.pc,
@@ -496,8 +512,6 @@ export default function Home() {
         const res = await fetch("/api/code/load");
         const code = await res.json();
 
-        // Start disassembly
-        // TODO: disassembly should be done on the backend
         setEvmCode(code.byteCode);
 
         const disassembly = disassembler.unserialize(code.disassembly);
