@@ -113,6 +113,7 @@ class VM {
         // Attempt to execute several opcodes in advance (without side effects) to anticipate
         // where the code will jump
         const LOOKAHEAD_STEPS = 8;
+        const lookaheadTrace = [];
 
         const mini = new MiniInterpreter(
             this.codeAsBuffer,
@@ -124,8 +125,8 @@ class VM {
 
         for (let i = 0; i < LOOKAHEAD_STEPS; i++) {
             const previousPc = mini.getPC();
-            const { error, stack, opcode } = mini.step();
 
+            const { error, stack, opcode } = mini.step();
             if (error) {
                 // Check if we stopped on a JUMP opcode
                 if (opcode == OP_JUMP) {
@@ -149,8 +150,13 @@ class VM {
 
                 // When an opcode is unhandled, just end the execution here
                 break;
+            } else {
+                lookaheadTrace.push({ pc: previousPc });
             }
         }
+
+        // TODO: store the state of VM more cleanly
+        this.lookaheadTrace = lookaheadTrace;
     }
 
     async run() {
@@ -172,15 +178,17 @@ class VM {
             this.afterStep = new WaitingGadget();
             this.vmStepFunction && this.vmStepFunction();
         }
-        // TODO: toast copy
-        //const evm2 = this.evm.copy();
     }
 
     state() {
         //console.log(Object.keys(this.lastStepState));
         //console.log(Object.keys(this.evm.eei._stateManager));
 
-        return { ...this.currentStep, dynamicJumps: this.dynamicJumps };
+        return {
+            ...this.currentStep,
+            dynamicJumps: this.dynamicJumps,
+            lookaheadTrace: this.lookaheadTrace,
+        };
     }
 
     addBreakpoint(addr) {
@@ -243,6 +251,7 @@ class MiniInterpreter {
                 stack.pop();
                 stack.pop();
                 this.pc = parseInt(addr);
+                advance = 0;
             }
         } else if (opcode == 0x56) {
             // JUMP

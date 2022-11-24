@@ -90,7 +90,7 @@ function DisassemblyEnd(props) {
 }
 
 function DisassemblyJumps(props) {
-    const { disassembly, viewStorage, pc, dynamicJumps } = props;
+    const { disassembly, viewStorage, pc, nextPc, dynamicJumps } = props;
 
     // TODO: the variable name is not OK: this is not a list of jumps but a list of positions of each instruction?
     const [jumps, setJumps] = useState({});
@@ -161,6 +161,11 @@ function DisassemblyJumps(props) {
                 active = true;
             }
 
+            let branchTaken = false;
+            if (active && jump.addr === nextPc) {
+                branchTaken = true;
+            }
+
             if (f1 && d1) {
                 let ay1 = f1.top < d1.top ? f1.top : d1.top;
                 let ay2 = ay1 + Math.abs(d1.top - f1.top);
@@ -173,7 +178,13 @@ function DisassemblyJumps(props) {
                     horizontalOverlapsAtYPosition[ay1] = 0;
                 else horizontalOverlapsAtYPosition[ay1]++;
 
-                const jumpDrawInfo = { y1: ay1, y2: ay2, jump, active };
+                const jumpDrawInfo = {
+                    y1: ay1,
+                    y2: ay2,
+                    jump,
+                    active,
+                    branchTaken,
+                };
                 addJump(jumpDrawInfo);
             }
         }
@@ -216,6 +227,8 @@ function DisassemblyJumps(props) {
                     ? cTheme["Library function"]
                     : cTheme["Function name"];
 
+                let jumpLineStyle = jump.branchTaken ? "dashed" : "solid";
+
                 elements.push(
                     <div
                         key={`${baseKey}_v`}
@@ -223,7 +236,7 @@ function DisassemblyJumps(props) {
                             position: "absolute",
                             width: 1,
                             height: jump.y2 - jump.y1,
-                            backgroundColor: lineColor,
+                            borderLeft: `1px ${jumpLineStyle} ${lineColor}`,
                             top: jump.y1 + yOffset,
                             left: maxSize - currentX - COLUMN_SIZE,
                         }}
@@ -388,6 +401,7 @@ function DisassemblyView(props) {
                 viewStorage={viewStorage.current}
                 dynamicJumps={dynamicJumps}
                 pc={vmRegisters.pc}
+                nextPc={vmRegisters.nextPc}
             />
             <div className="font-mono text-sm text-white ">
                 {renderDisassembly()}
@@ -555,9 +569,14 @@ export default function Home() {
     async function synchronizeWithDebugger() {
         const res2 = await fetch("/api/debugger/state");
         const state = await res2.json();
+
         setVmRegisters((prev) => ({
             ...prev,
             pc: state.pc,
+            nextPc:
+                state.lookaheadTrace.length > 1
+                    ? state?.lookaheadTrace[1].pc
+                    : null,
             stack: state.stack,
             memory: state.memory,
         }));

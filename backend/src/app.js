@@ -176,6 +176,7 @@ app.get("/debugger/state", async (req, res) => {
         memory: state.memory,
         memoryWordCount: state.memoryWordCount.toString(16),
         dynamicJumps: state.dynamicJumps,
+        lookaheadTrace: state.lookaheadTrace,
     });
 });
 
