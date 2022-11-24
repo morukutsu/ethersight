@@ -208,8 +208,12 @@ function DisassemblyJumps(props) {
                     16
                 )}_${jump.jump.from.toString(16)}`;
 
+                const dynamic = jump.jump.dynamic;
+
                 let lineColor = jump.active
                     ? cTheme["Function argument"]
+                    : dynamic
+                    ? cTheme["Library function"]
                     : cTheme["Function name"];
 
                 elements.push(
@@ -498,9 +502,6 @@ export default function Home() {
     }
 
     function calculateDynamicJumps(state) {
-        console.log("Calculating dynamic jumps");
-        //console.log(state.dynamicJumps);
-
         const jumps = [];
         for (const key of Object.keys(state.dynamicJumps)) {
             const dJump = state.dynamicJumps[key];
@@ -508,7 +509,6 @@ export default function Home() {
         }
 
         setDynamicJumps(jumps);
-        console.log(jumps);
 
         /*
         // TODO: cache this to make it faster

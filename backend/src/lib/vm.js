@@ -1,8 +1,3 @@
-/*
-    This is where the code is executed step by step
-    https://github.com/ethereumjs/ethereumjs-monorepo/blob/6d23fd07290fb3217e3371b0c42425647e28e89c/packages/evm/src/interpreter.ts#L151
-*/
-
 const { Blockchain } = require("@ethereumjs/blockchain");
 const { Chain, Common, Hardfork } = require("@ethereumjs/common");
 const { EEI } = require("@ethereumjs/vm");
@@ -49,6 +44,7 @@ class VM {
             // Validate the bytecode
             if (code.startsWith("0x")) code = code.substr(2);
             this.code = code;
+            this.codeAsBuffer = Buffer.from(this.code, "hex");
         };
 
         wrapper();
@@ -92,7 +88,7 @@ class VM {
 
         evm.runCode({
             //code: Buffer.from(code.join(""), "hex"),
-            code: Buffer.from(this.code, "hex"),
+            code: this.codeAsBuffer,
             gasLimit: BigInt(0xffff),
             //data: "0x57de26a4000000000000000000000000",
             //data: "0x23b872dd000000000000000000000000",
@@ -113,33 +109,32 @@ class VM {
     }
 
     handleAfterStep() {
-        // TODO: remove this, test lookahead
+        // Mini VM lookahead
+        // Attempt to execute several opcodes in advance (without side effects) to anticipate
+        // where the code will jump
         const LOOKAHEAD_STEPS = 8;
+
         const mini = new MiniInterpreter(
-            Buffer.from(this.code, "hex"),
+            this.codeAsBuffer,
             this.currentStep.stack,
             this.currentStep.pc
         );
 
-        for (let i = 0; i < LOOKAHEAD_STEPS; i++) {
-            const previousPc = mini.pc;
-            const result = mini.step();
+        const [OP_JUMP, OP_JUMPDEST] = [0x56, 0x5b];
 
-            if (result.error) {
+        for (let i = 0; i < LOOKAHEAD_STEPS; i++) {
+            const previousPc = mini.getPC();
+            const { error, stack, opcode } = mini.step();
+
+            if (error) {
                 // Check if we stopped on a JUMP opcode
-                if (result.opcode == 0x56) {
-                    //
-                    /*console.log(
-                            "Stopped lookahead on a JUMP to addr",
-                            result.stack[result.stack.length - 1]
-                        );*/
-                    const jumpAddr = result.stack[result.stack.length - 1];
+                if (opcode == OP_JUMP) {
+                    const jumpAddr = stack[stack.length - 1];
 
                     // Check if this addr is a valid jump
                     const target = mini.opcodes[jumpAddr];
-                    if (target == 0x5b) {
+                    if (target == OP_JUMPDEST) {
                         // JUMPDEST
-                        // TODO: Check if this is a dynamic jump or not
                         const staticJump =
                             this.disassembly.cache.jumpsByAddr[jumpAddr];
                         if (!staticJump) {
@@ -196,56 +191,65 @@ class VM {
 // Small interpreter for stack based instructions
 // Used for lookahead during dynamic jump analysis
 // Exits when it doesn't know how to execute an instruction
-// TODO: ideally we would like to use the same interpreter as the "VM" class
+// TODO: in the future we would like to use the same interpreter as the "VM" class
 class MiniInterpreter {
     constructor(opcodes, stack, pc) {
         this.opcodes = opcodes;
         this.stack = stack;
         this.pc = pc;
+    }
 
-        console.log("\nStart from", pc.toString(16));
+    getPC() {
+        return this.pc;
     }
 
     step() {
         let opcode = this.opcodes[this.pc];
         let stack = this.stack.slice();
 
-        console.log("pc", this.pc.toString(16), "op", opcode.toString(16));
-
         let advance = 1;
         let error = false;
-        let result = {};
 
-        //console.log("opcode", opcode.toString(16));
         if (opcode >= 0x90 && opcode <= 0x9f) {
             // SWAPX
             const n = opcode - 0x90 + 1;
-            //console.log("SWAP", n);
             const old = stack[stack.length - n - 1];
             stack[stack.length - n - 1] = stack[stack.length - 1];
             stack[stack.length - 1] = old;
         } else if (opcode == 0x50) {
             // POP
-            //console.log("POP");
             stack.pop();
         } else if (opcode >= 0x60 && opcode <= 0x7f) {
             // PUSHX
             const n = opcode - 0x60 + 1;
-            //console.log("PUSH", n);
-
             const op = opcodesTable[opcode];
             const operandValue = op[2](this.opcodes, this.pc);
             stack.push(BigInt(operandValue));
+
             advance = 1 + n;
         } else if (opcode >= 0x80 && opcode <= 0x8f) {
             // DUPX
             const n = opcode - 0x80 + 1;
-            //console.log("DUP", n);
             const elem = stack[stack.length - n];
             stack.push(elem);
         } else if (opcode == 0x5b) {
             // Skip JUMPDEST
-            //console.log("JUMPDEST");
+        } else if (opcode == 0x57) {
+            // JUMPI
+            const addr = stack[stack.length - 1];
+            const cond = stack[stack.length - 2];
+
+            if (cond > 0n) {
+                stack.pop();
+                stack.pop();
+                this.pc = parseInt(addr);
+            }
+        } else if (opcode == 0x56) {
+            // JUMP
+            /*const addr = stack[stack.length - 1];
+            stack.pop();
+            this.pc = parseInt(addr);*/
+            error = true;
         } else {
             //console.log("Unhandled opcode", opcode.toString(16));
             error = true;
@@ -253,8 +257,6 @@ class MiniInterpreter {
 
         this.pc += advance;
         this.stack = stack;
-
-        //console.log(this.stack);
 
         return {
             error,
