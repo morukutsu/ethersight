@@ -499,7 +499,18 @@ export default function Home() {
 
     function calculateDynamicJumps(state) {
         console.log("Calculating dynamic jumps");
+        //console.log(state.dynamicJumps);
 
+        const jumps = [];
+        for (const key of Object.keys(state.dynamicJumps)) {
+            const dJump = state.dynamicJumps[key];
+            jumps.push(dJump);
+        }
+
+        setDynamicJumps(jumps);
+        console.log(jumps);
+
+        /*
         // TODO: cache this to make it faster
         function getOpcodeByAddr(addr) {
             const idx = disassembly.opcodes.findIndex((e) => e.addr == addr);
@@ -511,7 +522,7 @@ export default function Home() {
             return disassembly.jumps[idx];
         }
 
-        //
+        // Use a small vm limited in scope to "execute ahead of time" and find future dynamic jumps
 
         const currentOpcode = getOpcodeByAddr(state.pc);
         if (currentOpcode.opcode === "JUMP") {
@@ -534,6 +545,7 @@ export default function Home() {
                 }
             }
         }
+        */
     }
 
     async function handleDebuggerRun() {

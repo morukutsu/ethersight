@@ -9,6 +9,7 @@ const { EEI } = require("@ethereumjs/vm");
 const { EVM } = require("@ethereumjs/evm");
 const { DefaultStateManager } = require("@ethereumjs/statemanager");
 const EventEmitter = require("events");
+const { opcodesTable } = require("evm-disasm-js");
 
 class WaitingGadget {
     constructor() {
@@ -19,12 +20,14 @@ class WaitingGadget {
 }
 
 class VM {
-    constructor(code) {
+    constructor(code, disassembly) {
         this.vmReadyWaiter = new WaitingGadget();
 
-        this.isStepping = false; // if true, the debugger will stop after each instruction
+        this.isStepping = true; // if true, the debugger will stop after each instruction
         this.eventEmitter = new EventEmitter();
         this.breakpoints = {};
+        this.dynamicJumps = {};
+        this.disassembly = disassembly;
 
         const wrapper = async () => {
             const common = new Common({
@@ -57,6 +60,7 @@ class VM {
         const { evm } = this;
 
         this.afterStep = new WaitingGadget();
+        this.dynamicJumps = {};
 
         evm.events.on("step", (data, end) => {
             const isBreakpoint = this.breakpoints[data.pc];
@@ -70,11 +74,14 @@ class VM {
                 this.currentStep = data;
                 this.afterStep.resolve(data);
 
+                /*
                 console.log(
                     `${data.pc.toString(16)} Op: ${data.opcode.name}\tStack: ${
                         data.stack
                     }`
-                );
+                );*/
+
+                this.handleAfterStep();
 
                 this.vmStepFunction = end;
                 this.eventEmitter.emit("vm_step", "data");
@@ -105,6 +112,52 @@ class VM {
             .catch(console.error);
     }
 
+    handleAfterStep() {
+        // TODO: remove this, test lookahead
+        const LOOKAHEAD_STEPS = 8;
+        const mini = new MiniInterpreter(
+            Buffer.from(this.code, "hex"),
+            this.currentStep.stack,
+            this.currentStep.pc
+        );
+
+        for (let i = 0; i < LOOKAHEAD_STEPS; i++) {
+            const previousPc = mini.pc;
+            const result = mini.step();
+
+            if (result.error) {
+                // Check if we stopped on a JUMP opcode
+                if (result.opcode == 0x56) {
+                    //
+                    /*console.log(
+                            "Stopped lookahead on a JUMP to addr",
+                            result.stack[result.stack.length - 1]
+                        );*/
+                    const jumpAddr = result.stack[result.stack.length - 1];
+
+                    // Check if this addr is a valid jump
+                    const target = mini.opcodes[jumpAddr];
+                    if (target == 0x5b) {
+                        // JUMPDEST
+                        // TODO: Check if this is a dynamic jump or not
+                        const staticJump =
+                            this.disassembly.cache.jumpsByAddr[jumpAddr];
+                        if (!staticJump) {
+                            this.dynamicJumps[jumpAddr] = {
+                                addr: parseInt(jumpAddr),
+                                from: previousPc,
+                                dynamic: true,
+                            };
+                        }
+                    }
+                }
+
+                // When an opcode is unhandled, just end the execution here
+                break;
+            }
+        }
+    }
+
     async run() {
         // If the VM was stepping: unlock it
         this.vmStepFunction && this.vmStepFunction();
@@ -124,17 +177,91 @@ class VM {
             this.afterStep = new WaitingGadget();
             this.vmStepFunction && this.vmStepFunction();
         }
+        // TODO: toast copy
+        //const evm2 = this.evm.copy();
     }
 
     state() {
         //console.log(Object.keys(this.lastStepState));
         //console.log(Object.keys(this.evm.eei._stateManager));
 
-        return { ...this.currentStep };
+        return { ...this.currentStep, dynamicJumps: this.dynamicJumps };
     }
 
     addBreakpoint(addr) {
         this.breakpoints[addr] = true;
+    }
+}
+
+// Small interpreter for stack based instructions
+// Used for lookahead during dynamic jump analysis
+// Exits when it doesn't know how to execute an instruction
+// TODO: ideally we would like to use the same interpreter as the "VM" class
+class MiniInterpreter {
+    constructor(opcodes, stack, pc) {
+        this.opcodes = opcodes;
+        this.stack = stack;
+        this.pc = pc;
+
+        console.log("\nStart from", pc.toString(16));
+    }
+
+    step() {
+        let opcode = this.opcodes[this.pc];
+        let stack = this.stack.slice();
+
+        console.log("pc", this.pc.toString(16), "op", opcode.toString(16));
+
+        let advance = 1;
+        let error = false;
+        let result = {};
+
+        //console.log("opcode", opcode.toString(16));
+        if (opcode >= 0x90 && opcode <= 0x9f) {
+            // SWAPX
+            const n = opcode - 0x90 + 1;
+            //console.log("SWAP", n);
+            const old = stack[stack.length - n - 1];
+            stack[stack.length - n - 1] = stack[stack.length - 1];
+            stack[stack.length - 1] = old;
+        } else if (opcode == 0x50) {
+            // POP
+            //console.log("POP");
+            stack.pop();
+        } else if (opcode >= 0x60 && opcode <= 0x7f) {
+            // PUSHX
+            const n = opcode - 0x60 + 1;
+            //console.log("PUSH", n);
+
+            const op = opcodesTable[opcode];
+            const operandValue = op[2](this.opcodes, this.pc);
+            stack.push(BigInt(operandValue));
+            advance = 1 + n;
+        } else if (opcode >= 0x80 && opcode <= 0x8f) {
+            // DUPX
+            const n = opcode - 0x80 + 1;
+            //console.log("DUP", n);
+            const elem = stack[stack.length - n];
+            stack.push(elem);
+        } else if (opcode == 0x5b) {
+            // Skip JUMPDEST
+            //console.log("JUMPDEST");
+        } else {
+            //console.log("Unhandled opcode", opcode.toString(16));
+            error = true;
+        }
+
+        this.pc += advance;
+        this.stack = stack;
+
+        //console.log(this.stack);
+
+        return {
+            error,
+            pc: this.pc,
+            stack: this.stack,
+            opcode,
+        };
     }
 }
 

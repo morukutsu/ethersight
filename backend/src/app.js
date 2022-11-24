@@ -1,5 +1,5 @@
 const express = require("express");
-const disasembler = require("evm-disasm-js");
+const disassembler = require("evm-disasm-js");
 const fs = require("fs");
 const { WebSocketServer } = require("ws");
 const { v4: uuidv4 } = require("uuid");
@@ -19,7 +19,7 @@ const bytes =
     "0x60806040526000805534801561001457600080fd5b50610150806100246000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c806357de26a41461003b578063d09de08a14610059575b600080fd5b610043610063565b604051610050919061009c565b60405180910390f35b61006161006c565b005b60008054905090565b600160005461007b91906100e6565b600081905550565b6000819050919050565b61009681610083565b82525050565b60006020820190506100b1600083018461008d565b92915050565b7f4e487b7100000000000000000000000000000000000000000000000000000000600052601160045260246000fd5b60006100f182610083565b91506100fc83610083565b9250828201905080821115610114576101136100b7565b5b9291505056fea2646970667358221220b6ab24c13c6cda0b644dfc989c0d2a21c12611547602bde8a254f33c3598539b64736f6c63430008110033";
 
 let currentByteCode = "";
-let BYTECODE_INDEX = 1;
+let BYTECODE_INDEX = 2;
 let wss;
 const clients = {};
 
@@ -68,8 +68,8 @@ function changeCodeSection(index) {
     console.log(currentByteCode);
 }
 
-async function createVM(code) {
-    vm = new VM(code);
+async function createVM(code, disassembly) {
+    vm = new VM(code, disassembly);
 
     vm.eventEmitter.on("vm_exit", (e) => {
         sendToClient({ type: "vm_exit" });
@@ -83,7 +83,7 @@ async function createVM(code) {
         sendToClient({ type: "vm_breakpoint", ...e });
     });
 
-    vm.addBreakpoint(0x4c);
+    //vm.addBreakpoint(0x4c);
 
     await vm.start();
 }
@@ -108,17 +108,17 @@ async function wrapper() {
     {
         const fullByteCode =
             "0x" + bytecodes[Object.keys(bytecodes)[BYTECODE_INDEX]];
-        dbgState.disassembly = disasembler.disassemble(fullByteCode);
-        dbgState.serializedDisassembly = disasembler.serialize(
+        dbgState.disassembly = disassembler.disassemble(fullByteCode);
+        dbgState.serializedDisassembly = disassembler.serialize(
             dbgState.disassembly
         );
     }
 
     changeCodeSection(0);
 
-    disassembly = disasembler.disassemble(currentByteCode);
-    serialized = disasembler.serialize(disassembly);
-    await createVM(currentByteCode);
+    disassembly = disassembler.disassemble(currentByteCode);
+    serialized = disassembler.serialize(disassembly);
+    await createVM(currentByteCode, disassembly);
 }
 
 wrapper();
@@ -138,9 +138,8 @@ app.get("/code/changeSection/:section", (req, res) => {
 
     // After change section, must update the disasm and vm state
     // TODO: find a new function to automate this
-    disassembly = disasembler.disassemble(currentByteCode);
-    serialized = disasembler.serialize(disassembly);
-    createVM(currentByteCode);
+    disassembly = disassembler.disassemble(currentByteCode);
+    createVM(currentByteCode, disassembly);
 
     res.send({});
 });
@@ -151,7 +150,8 @@ app.get("/debugger/run", async (req, res) => {
 });
 
 app.get("/debugger/start", async (req, res) => {
-    await createVM(currentByteCode);
+    disassembly = disassembler.disassemble(currentByteCode);
+    await createVM(currentByteCode, disassembly);
 
     res.send({});
 });
@@ -175,6 +175,7 @@ app.get("/debugger/state", async (req, res) => {
         stack,
         memory: state.memory,
         memoryWordCount: state.memoryWordCount.toString(16),
+        dynamicJumps: state.dynamicJumps,
     });
 });
 
