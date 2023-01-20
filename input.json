@@ -1,5 +1,8 @@
 {
     "bytecode": {
         "file": "sample_bytecode.hex"
+    },
+    "runtime": {
+        "calldata": "0xc2985578000000000000000000000000"
     }
 }

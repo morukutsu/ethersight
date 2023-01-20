@@ -15,7 +15,7 @@ class WaitingGadget {
 }
 
 class VM {
-    constructor(code, disassembly) {
+    constructor(code, disassembly, calldata) {
         this.vmReadyWaiter = new WaitingGadget();
 
         this.isStepping = true; // if true, the debugger will stop after each instruction
@@ -23,6 +23,7 @@ class VM {
         this.breakpoints = {};
         this.dynamicJumps = {};
         this.disassembly = disassembly;
+        this.calldata = calldata;
 
         const wrapper = async () => {
             const common = new Common({
@@ -93,7 +94,12 @@ class VM {
             //data: "0x57de26a4000000000000000000000000",
             //data: "0x23b872dd000000000000000000000000",
             // TODO: some sample data, make this customizable
-            data: Buffer.from("c2985578000000000000000000000000", "hex"),
+            data: Buffer.from(
+                this.calldata.startsWith("0x")
+                    ? this.calldata.substr(2)
+                    : this.calldata,
+                "hex"
+            ),
         })
             .then((results) => {
                 console.log(`Returned: ${results.returnValue.toString("hex")}`);

@@ -31,9 +31,7 @@ function sendToClient(message) {
     }
 }
 
-const bytecodes = {};
 let fullByteCode = "";
-
 let vm, disassembly, serialized, currentCodeSection;
 
 const dbgState = {};
@@ -41,6 +39,7 @@ const dbgState = {};
 // Load debugger config file
 const rootDir = flags.rootDir || ".";
 const dbgConfig = JSON.parse(fs.readFileSync(rootDir + "/" + flags.input));
+let calldata = "";
 
 if (flags.input) {
     if (dbgConfig?.bytecode?.file) {
@@ -49,6 +48,10 @@ if (flags.input) {
         console.log("Loading bytecode from", bytecodePath);
         fullByteCode = fs.readFileSync(bytecodePath, "utf-8");
         console.log(fullByteCode);
+    }
+
+    if (dbgConfig?.runtime?.calldata) {
+        calldata = dbgConfig.runtime.calldata;
     }
 }
 
@@ -63,8 +66,8 @@ function changeCodeSection(index) {
     console.log(currentByteCode);
 }
 
-async function createVM(code, disassembly) {
-    vm = new VM(code, disassembly);
+async function createVM(code, disassembly, calldata) {
+    vm = new VM(code, disassembly, calldata);
 
     vm.eventEmitter.on("vm_exit", (e) => {
         sendToClient({ type: "vm_exit" });
@@ -127,7 +130,7 @@ async function _start() {
 
     disassembly = disassembler.disassemble(currentByteCode);
     serialized = disassembler.serialize(disassembly);
-    await createVM(currentByteCode, disassembly);
+    await createVM(currentByteCode, disassembly, calldata);
 }
 
 _start();
@@ -150,7 +153,7 @@ app.get("/code/changeSection/:section", (req, res) => {
     disassembly = disassembler.disassemble(currentByteCode);
     serialized = disassembler.serialize(disassembly);
 
-    createVM(currentByteCode, disassembly);
+    createVM(currentByteCode, disassembly, calldata);
 
     res.send({});
 });
@@ -162,7 +165,7 @@ app.get("/debugger/run", async (req, res) => {
 
 app.get("/debugger/start", async (req, res) => {
     disassembly = disassembler.disassemble(currentByteCode);
-    await createVM(currentByteCode, disassembly);
+    await createVM(currentByteCode, disassembly, calldata);
 
     res.send({});
 });
