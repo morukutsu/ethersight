@@ -14,6 +14,7 @@
     "@ethereumjs/evm": "^1.2.2",
     "@ethereumjs/statemanager": "^1.0.1",
     "@ethereumjs/vm": "^6.2.0",
+    "args": "^5.0.3",
     "express": "^4.18.2",
     "uuid": "^9.0.0",
     "ws": "^8.11.0"

@@ -92,7 +92,7 @@ class VM {
             gasLimit: BigInt(0xffff),
             //data: "0x57de26a4000000000000000000000000",
             //data: "0x23b872dd000000000000000000000000",
-            // CORRECT
+            // TODO: some sample data, make this customizable
             data: Buffer.from("c2985578000000000000000000000000", "hex"),
         })
             .then((results) => {

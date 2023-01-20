@@ -3,23 +3,24 @@ const disassembler = require("evm-disasm-js");
 const fs = require("fs");
 const { WebSocketServer } = require("ws");
 const { v4: uuidv4 } = require("uuid");
-
 const { readdir } = require("node:fs/promises");
+const args = require("args");
 
 const VM = require("./lib/vm");
 
 const app = express();
 const port = 3344;
 
-// TODO
-// TEMP: here we load the code
-const bytesWithoutConstructor =
-    "0x608060405234801561001057600080fd5b50600436106100365760003560e01c806357de26a41461003b578063d09de08a14610059575b600080fd5b610043610063565b604051610050919061009c565b60405180910390f35b61006161006c565b005b60008054905090565b600160005461007b91906100e6565b600081905550565b6000819050919050565b61009681610083565b82525050565b60006020820190506100b1600083018461008d565b92915050565b7f4e487b7100000000000000000000000000000000000000000000000000000000600052601160045260246000fd5b60006100f182610083565b91506100fc83610083565b9250828201905080821115610114576101136100b7565b5b9291505056fea2646970667358221220b6ab24c13c6cda0b644dfc989c0d2a21c12611547602bde8a254f33c3598539b64736f6c63430008110033";
-const bytes =
-    "0x60806040526000805534801561001457600080fd5b50610150806100246000396000f3fe608060405234801561001057600080fd5b50600436106100365760003560e01c806357de26a41461003b578063d09de08a14610059575b600080fd5b610043610063565b604051610050919061009c565b60405180910390f35b61006161006c565b005b60008054905090565b600160005461007b91906100e6565b600081905550565b6000819050919050565b61009681610083565b82525050565b60006020820190506100b1600083018461008d565b92915050565b7f4e487b7100000000000000000000000000000000000000000000000000000000600052601160045260246000fd5b60006100f182610083565b91506100fc83610083565b9250828201905080821115610114576101136100b7565b5b9291505056fea2646970667358221220b6ab24c13c6cda0b644dfc989c0d2a21c12611547602bde8a254f33c3598539b64736f6c63430008110033";
+args.option("input", "Main configuration file").option(
+    "root-dir",
+    "Directory configuration files will be loaded from"
+);
+
+const flags = args.parse(process.argv);
+
+console.log(flags);
 
 let currentByteCode = "";
-let BYTECODE_INDEX = 2;
 let wss;
 const clients = {};
 
@@ -30,37 +31,31 @@ function sendToClient(message) {
     }
 }
 
-//console.log(disassember.serialize(disassembly));
-//
-
 const bytecodes = {};
+let fullByteCode = "";
+
 let vm, disassembly, serialized, currentCodeSection;
 
 const dbgState = {};
 
-const events = [];
+// Load debugger config file
+const rootDir = flags.rootDir || ".";
+const dbgConfig = JSON.parse(fs.readFileSync(rootDir + "/" + flags.input));
 
-class WaitingGadget {
-    constructor() {
-        this.promise = new Promise((resolve) => {
-            this.resolve = resolve;
-        });
+if (flags.input) {
+    if (dbgConfig?.bytecode?.file) {
+        const bytecodePath = `${rootDir}/${dbgConfig.bytecode.file}`;
+
+        console.log("Loading bytecode from", bytecodePath);
+        fullByteCode = fs.readFileSync(bytecodePath, "utf-8");
+        console.log(fullByteCode);
     }
-}
-
-let pendingEvent = new WaitingGadget();
-
-function addEvent(event) {
-    events.push(event);
-    pendingEvent.resolve();
-    pendingEvent = new WaitingGadget();
 }
 
 function changeCodeSection(index) {
     const codeStart = dbgState.disassembly.codeSections[index].start;
     const codeStartBytes = codeStart * 2;
 
-    const fullByteCode = bytecodes[Object.keys(bytecodes)[BYTECODE_INDEX]];
     currentByteCode = "0x" + fullByteCode.substr(codeStartBytes);
     currentCodeSection = index;
 
@@ -83,12 +78,10 @@ async function createVM(code, disassembly) {
         sendToClient({ type: "vm_breakpoint", ...e });
     });
 
-    //vm.addBreakpoint(0x4c);
-
     await vm.start();
 }
 
-async function wrapper() {
+/*async function wrapper() {
     // Load all the bytecode from the list of samples
     const SAMPLES_BUILD_PATH = "../samples/build";
     try {
@@ -119,9 +112,25 @@ async function wrapper() {
     disassembly = disassembler.disassemble(currentByteCode);
     serialized = disassembler.serialize(disassembly);
     await createVM(currentByteCode, disassembly);
+}*/
+
+//wrapper();
+
+async function _start() {
+    // Perform initial disassembly of the full bytecode
+    dbgState.disassembly = disassembler.disassemble("0x" + fullByteCode);
+    dbgState.serializedDisassembly = disassembler.serialize(
+        dbgState.disassembly
+    );
+
+    changeCodeSection(0);
+
+    disassembly = disassembler.disassemble(currentByteCode);
+    serialized = disassembler.serialize(disassembly);
+    await createVM(currentByteCode, disassembly);
 }
 
-wrapper();
+_start();
 
 app.get("/", (req, res) => {
     res.send("Hello World!");
@@ -139,6 +148,8 @@ app.get("/code/changeSection/:section", (req, res) => {
     // After change section, must update the disasm and vm state
     // TODO: find a new function to automate this
     disassembly = disassembler.disassemble(currentByteCode);
+    serialized = disassembler.serialize(disassembly);
+
     createVM(currentByteCode, disassembly);
 
     res.send({});
@@ -163,7 +174,6 @@ app.get("/debugger/step", async (req, res) => {
 
 app.get("/debugger/state", async (req, res) => {
     const state = vm.state();
-    //console.log(state);
 
     const stack = state.stack.map((v) => v.toString(16));
 
@@ -183,7 +193,7 @@ app.get("/debugger/state", async (req, res) => {
 // Server start
 // ------------
 const server = app.listen(port, () => {
-    console.log(`Example app listening on port ${port}`);
+    console.log(`ethersight backend listening on port ${port}`);
 });
 
 wss = new WebSocketServer({ server });
