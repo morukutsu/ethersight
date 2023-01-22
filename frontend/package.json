@@ -9,6 +9,7 @@
     "lint": "next lint"
   },
   "dependencies": {
+    "evm-disasm-js": "github:morukutsu/evm-disasm-js",
     "mitt": "^3.0.0",
     "next": "13.0.0",
     "react": "18.2.0",

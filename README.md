@@ -15,11 +15,8 @@ TODO:
 
 -   Load Ethereum state from a node (or file)
 -   Step backward
+-   Breakpoints UI
 -   and more...
-
-## Dependencies
-
-This projects depends on evm-disasm-js (https://github.com/morukutsu/evm-disasm-js) which is not yet published on NPM. At the moment it must be pulled manually and linked using "npm link". This will be fixed soon.
 
 ## Usage
 
@@ -28,13 +25,12 @@ As the project evolves, the install steps will be simplified.
 ### 0. Install dependencies
 
 ```
-git clone https://github.com/morukutsu/evm-disasm-js.git
-cd evm-disasm-js
-npm link
+# 1. Use script
+./install-ethersight.sh
 
+# 2. Or install dependencies manually
 cd backend
 npm install
-npm link evm-disasm-js # TODO: remove this
 
 cd frontend
 npm install
