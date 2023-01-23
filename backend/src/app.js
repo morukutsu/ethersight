@@ -1,136 +1,155 @@
+const fs = require("fs");
+const args = require("args");
+const path = require("path");
+//const { readdir } = require("node:fs/promises");
+
 const express = require("express");
 const disassembler = require("evm-disasm-js");
-const fs = require("fs");
 const { WebSocketServer } = require("ws");
 const { v4: uuidv4 } = require("uuid");
-const { readdir } = require("node:fs/promises");
-const args = require("args");
 
 const VM = require("./lib/vm");
 
 const app = express();
-const port = 3344;
+const port = 3344; // TODO: configurable backend port
 
-args.option("input", "Main configuration file").option(
-    "root-dir",
-    "Directory configuration files will be loaded from"
-);
+/*
+    Define and parse command line arguments
+*/
+function readArgs() {
+    args.option("input", "Debugger cconfiguration file");
+    args.option(
+        "root-dir",
+        "Configuration files paths passed with --input will be loaded from <root-dir> if the path is relative."
+    );
 
-const flags = args.parse(process.argv);
+    const flags = args.parse(process.argv);
+    if (!flags.input) {
+        console.error(
+            "Error, no input file. Use --input option to pass a debugger .json configuration file."
+        );
 
-console.log(flags);
+        process.exit(1);
+    }
 
-let currentByteCode = "";
-let wss;
-const clients = {};
+    let inputFilePath = flags.input;
+    let rootDir = flags.rootDir;
 
-function sendToClient(message) {
-    const str = JSON.stringify(message);
-    for (let id in clients) {
-        clients[id].send(str);
+    if (!rootDir) rootDir = process.cwd();
+
+    if (!path.isAbsolute(flags.input)) {
+        inputFilePath = rootDir + "/" + flags.input;
+    }
+
+    console.log("Loading configuration file from", inputFilePath);
+
+    return {
+        inputFileDir: path.dirname(inputFilePath),
+        inputFilePath,
+        rootDir,
+    };
+}
+
+const programArgs = readArgs();
+
+function parseDebuggerInputFile(file) {
+    try {
+        const rawContent = fs.readFileSync(file);
+        try {
+            return JSON.parse(rawContent);
+        } catch (e) {
+            console.error("Could not parse input file", file);
+            console.error(e);
+            process.exit(1);
+        }
+    } catch (e) {
+        console.error("Could not load file", file, "does not exist.");
+        process.exit(1);
     }
 }
 
-let fullByteCode = "";
-let vm, disassembly, serialized, currentCodeSection;
+const dbgConfig = parseDebuggerInputFile(programArgs.inputFilePath);
 
-const dbgState = {};
+const dbgState = {
+    calldata: "",
+    fullByteCodeDisassembly: "",
+    fullByteCodeDisassemblySerialized: "",
+    currentByteCode: "",
+    currentByteCodeDisassembly: null,
+    vm: null,
+};
 
-// Load debugger config file
-const rootDir = flags.rootDir || ".";
-const dbgConfig = JSON.parse(fs.readFileSync(rootDir + "/" + flags.input));
-let calldata = "";
+const dbgCode = {
+    fullByteCode: "", // Complete bytecode to debug
+};
 
-if (flags.input) {
-    if (dbgConfig?.bytecode?.file) {
-        const bytecodePath = `${rootDir}/${dbgConfig.bytecode.file}`;
+if (dbgConfig?.bytecode?.file) {
+    const bytecodePath = `${programArgs.inputFileDir}/${dbgConfig.bytecode.file}`;
 
-        console.log("Loading bytecode from", bytecodePath);
-        fullByteCode = fs.readFileSync(bytecodePath, "utf-8");
-        console.log(fullByteCode);
-    }
+    console.log("Loading bytecode from", bytecodePath);
+    dbgCode.fullByteCode = fs.readFileSync(bytecodePath, "utf-8");
+    console.log(dbgCode.fullByteCode);
+}
 
-    if (dbgConfig?.runtime?.calldata) {
-        calldata = dbgConfig.runtime.calldata;
-    }
+if (dbgConfig?.runtime?.calldata) {
+    dbgState.calldata = dbgConfig.runtime.calldata;
 }
 
 function changeCodeSection(index) {
-    const codeStart = dbgState.disassembly.codeSections[index].start;
+    const codeStart =
+        dbgState.fullByteCodeDisassembly.codeSections[index].start;
     const codeStartBytes = codeStart * 2;
 
-    currentByteCode = "0x" + fullByteCode.substr(codeStartBytes);
+    dbgState.currentByteCode =
+        "0x" + dbgCode.fullByteCode.substr(codeStartBytes);
     currentCodeSection = index;
 
     console.log("change section", index, "code start", codeStart);
-    console.log(currentByteCode);
+    console.log(dbgState.currentByteCode);
 }
 
 async function createVM(code, disassembly, calldata) {
-    vm = new VM(code, disassembly, calldata);
+    dbgState.vm = new VM(code, disassembly, calldata);
 
-    vm.eventEmitter.on("vm_exit", (e) => {
+    dbgState.vm.eventEmitter.on("vm_exit", (e) => {
         sendToClient({ type: "vm_exit" });
     });
 
-    vm.eventEmitter.on("vm_step", (e) => {
+    dbgState.vm.eventEmitter.on("vm_step", (e) => {
         sendToClient({ type: "vm_step" });
     });
 
-    vm.eventEmitter.on("vm_breakpoint", (e) => {
+    dbgState.vm.eventEmitter.on("vm_breakpoint", (e) => {
         sendToClient({ type: "vm_breakpoint", ...e });
     });
 
-    await vm.start();
+    await dbgState.vm.start();
 }
-
-/*async function wrapper() {
-    // Load all the bytecode from the list of samples
-    const SAMPLES_BUILD_PATH = "../samples/build";
-    try {
-        const files = await readdir(SAMPLES_BUILD_PATH);
-        for (const file of files) {
-            //console.log(`${SAMPLES_BUILD_PATH}/${file}`);
-            bytecodes[file] = fs.readFileSync(
-                `${SAMPLES_BUILD_PATH}/${file}`,
-                "utf-8"
-            );
-        }
-    } catch (e) {
-        console.error(e);
-    }
-
-    // Perform initial disassembly of the full bytecode
-    {
-        const fullByteCode =
-            "0x" + bytecodes[Object.keys(bytecodes)[BYTECODE_INDEX]];
-        dbgState.disassembly = disassembler.disassemble(fullByteCode);
-        dbgState.serializedDisassembly = disassembler.serialize(
-            dbgState.disassembly
-        );
-    }
-
-    changeCodeSection(0);
-
-    disassembly = disassembler.disassemble(currentByteCode);
-    serialized = disassembler.serialize(disassembly);
-    await createVM(currentByteCode, disassembly);
-}*/
-
-//wrapper();
 
 async function _start() {
     // Perform initial disassembly of the full bytecode
-    dbgState.disassembly = disassembler.disassemble("0x" + fullByteCode);
-    dbgState.serializedDisassembly = disassembler.serialize(
-        dbgState.disassembly
+    dbgState.fullByteCodeDisassembly = disassembler.disassemble(
+        "0x" + dbgCode.fullByteCode
+    );
+    dbgState.fullByteCodeDisassemblySerialized = disassembler.serialize(
+        dbgState.fullByteCodeDisassembly
     );
 
     changeCodeSection(0);
 
-    disassembly = disassembler.disassemble(currentByteCode);
-    serialized = disassembler.serialize(disassembly);
-    await createVM(currentByteCode, disassembly, calldata);
+    dbgState.currentByteCodeDisassembly = disassembler.disassemble(
+        dbgState.currentByteCode
+    );
+
+    dbgState.currentByteCodeDisassemblySerialized = disassembler.serialize(
+        dbgState.currentByteCodeDisassembly
+    );
+
+    await createVM(
+        dbgState.currentByteCode,
+        dbgState.currentByteCodeDisassembly,
+        dbgState.calldata
+    );
 }
 
 _start();
@@ -140,7 +159,10 @@ app.get("/", (req, res) => {
 });
 
 app.get("/code/load", (req, res) => {
-    res.send({ byteCode: currentByteCode, disassembly: serialized });
+    res.send({
+        byteCode: dbgState.currentByteCode,
+        disassembly: dbgState.currentByteCodeDisassemblySerialized,
+    });
 });
 
 app.get("/code/changeSection/:section", (req, res) => {
@@ -150,33 +172,47 @@ app.get("/code/changeSection/:section", (req, res) => {
 
     // After change section, must update the disasm and vm state
     // TODO: find a new function to automate this
-    disassembly = disassembler.disassemble(currentByteCode);
-    serialized = disassembler.serialize(disassembly);
+    dbgState.currentByteCodeDisassembly = disassembler.disassemble(
+        dbgState.currentByteCode
+    );
+    dbgState.currentByteCodeDisassemblySerialized = disassembler.serialize(
+        dbgState.currentByteCodeDisassembly
+    );
 
-    createVM(currentByteCode, disassembly, calldata);
+    createVM(
+        dbgState.currentByteCode,
+        dbgState.currentByteCodeDisassembly,
+        dbgState.calldata
+    );
 
     res.send({});
 });
 
 app.get("/debugger/run", async (req, res) => {
-    await vm.run();
+    await dbgState.vm.run();
     res.send({});
 });
 
 app.get("/debugger/start", async (req, res) => {
-    disassembly = disassembler.disassemble(currentByteCode);
-    await createVM(currentByteCode, disassembly, calldata);
+    dbgState.currentByteCodeDisassembly = disassembler.disassemble(
+        dbgState.currentByteCode
+    );
+    await createVM(
+        dbgState.currentByteCode,
+        dbgState.currentByteCodeDisassembly,
+        dbgState.calldata
+    );
 
     res.send({});
 });
 
 app.get("/debugger/step", async (req, res) => {
-    const isEnd = await vm.step();
+    const isEnd = await dbgState.vm.step();
     res.send({});
 });
 
 app.get("/debugger/state", async (req, res) => {
-    const state = vm.state();
+    const state = dbgState.vm.state();
 
     const stack = state.stack.map((v) => v.toString(16));
 
@@ -199,29 +235,39 @@ const server = app.listen(port, () => {
     console.log(`ethersight backend listening on port ${port}`);
 });
 
-wss = new WebSocketServer({ server });
+let websocketServer;
+const websocketClients = {};
+
+function sendToClient(message) {
+    const str = JSON.stringify(message);
+    for (let id in websocketClients) {
+        websocketClients[id].send(str);
+    }
+}
+
+websocketServer = new WebSocketServer({ server });
 
 const CLIENT_PING_INTERVAL = 10 * 1000; // ping clients every 10s
 const CLIENT_ALIVE_CHECK_INTERVAL = 5 * 1000;
 const CLIENT_DISCONNECTED_TIMEOUT = 15 * 1000;
 
 async function dropClient(clientId) {
-    if (!clients[clientId]) return;
+    if (!websocketClients[clientId]) return;
 
     console.log(
         "[Disconnect] dropping client",
         clientId,
-        clients[clientId]._clientIp
+        websocketClients[clientId]._clientIp
     );
-    clearInterval(clients[clientId]._clientPingRef);
-    delete clients[clientId];
+    clearInterval(websocketClients[clientId]._clientPingRef);
+    delete websocketClients[clientId];
 }
 
 setInterval(() => {
     const ts = Date.now();
-    for (const clientId of Object.keys(clients)) {
+    for (const clientId of Object.keys(websocketClients)) {
         if (
-            ts - clients[clientId]._clientLastPongTs >
+            ts - websocketClients[clientId]._clientLastPongTs >
             CLIENT_DISCONNECTED_TIMEOUT
         ) {
             dropClient(clientId);
@@ -240,7 +286,7 @@ function onMessage(ws, message) {
     }
 }
 
-wss.on("connection", function connection(ws, req) {
+websocketServer.on("connection", function connection(ws, req) {
     // Register client connection/socket
     const id = uuidv4();
     ws._clientId = id;
@@ -256,7 +302,7 @@ wss.on("connection", function connection(ws, req) {
         .split(",")[0]
         .trim();
     ws._clientIp = ip || req.socket.remoteAddress;
-    clients[id] = ws;
+    websocketClients[id] = ws;
 
     // Handlers
     ws.on("message", (msg) => onMessage(ws, msg));
